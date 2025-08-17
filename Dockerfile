@@ -1,38 +1,33 @@
 # syntax=docker/dockerfile:1
 
-# Comments are provided throughout this file to help you get started.
-# If you need more help, visit the Dockerfile reference guide at
-# https://docs.docker.com/go/dockerfile-reference/
+# ----------- 构建阶段 -----------
+FROM node:22-alpine AS builder
+WORKDIR /app
 
-# Want to help us make this template better? Share your feedback here: https://forms.gle/ybq9Krt8jtBL3iCk7
+# 只复制依赖文件用于缓存依赖安装层
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
-ARG NODE_VERSION=22.11.0
+# 只复制应用源代码（不拷贝多余文件）
+COPY index.js ./
 
-FROM node:${NODE_VERSION}-alpine
+# ----------- 运行阶段 -----------
+FROM node:22-alpine
 
-# Use production node environment by default.
-ENV NODE_ENV production
-
-
-WORKDIR /usr/src/app
-
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.npm to speed up subsequent builds.
-# Leverage a bind mounts to package.json and package-lock.json to avoid having to copy them into
-# into this layer.
-RUN --mount=type=bind,source=package.json,target=package.json \
-    --mount=type=bind,source=package-lock.json,target=package-lock.json \
-    --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev
-
-# Run the application as a non-root user.
+# 只创建运行所需目录，使用非root用户
+WORKDIR /app
 USER node
 
-# Copy the rest of the source files into the image.
-COPY . .
+# 只拷贝生产依赖和必要文件
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/index.js ./
+COPY --from=builder --chown=node:node /app/package.json ./
 
-# Expose the port that the application listens on.
+# Docker最佳实践：不包含锁文件到生产（如需可加）
+# COPY --from=builder --chown=node:node /app/package-lock.json ./
+
+# 不暴露无用端口
 EXPOSE 3000
 
-# Run the application.
-CMD npm start
+# 只定义启动命令
+CMD ["node", "index.js"]
